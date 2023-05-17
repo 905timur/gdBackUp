@@ -19,7 +19,7 @@ pip install tkinter
 
 **-GOOGLE DRIVE API CONFIGURATION-**
 
-1. Navigate to [[https://www.reddit.com/prefs/apps](https://pythonhosted.org/PyDrive/quickstart.html#authentication)](https://pythonhosted.org/PyDrive/quickstart.html#authentication)
+1. Navigate to https://pythonhosted.org/PyDrive/quickstart.html#authentication
 
 2. Follow the instructions on the page above to acquire a .json file with your authentication credentials for Google Drive. 
 
