@@ -11,7 +11,7 @@ from datetime import datetime
 def authenticate():
     try:
         gauth = GoogleAuth()
-        gauth.LoadClientConfigFile('client_secret_643997294645-vpbsju3k1qdmqckncm5qpaojv228i950.apps.googleusercontent.com.json')
+        gauth.LoadClientConfigFile('XXX.json')
         gauth.LocalWebserverAuth()
         drive = GoogleDrive(gauth)
         return drive
