@@ -6,36 +6,53 @@ from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 from tkinter import ttk
 from datetime import datetime
+import threading
 
 
-def authenticate():
+def authenticate(credentials_file):
     try:
         gauth = GoogleAuth()
-        gauth.LoadClientConfigFile('XXX.json') # Insert your .jason file here
+        gauth.LoadClientConfigFile(credentials_file)
         gauth.LocalWebserverAuth()
         drive = GoogleDrive(gauth)
         return drive
     except Exception as e:
         logging.error(f"Authentication failed: {str(e)}")
+        raise
 
 
 def create_folder(drive, folder_name, parent_id=None):
-    # Check if the folder already exists
-    query = f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    existing_folders = drive.ListFile({'q': query}).GetList()
-    if existing_folders:
-        return existing_folders[0]
+    try:
+        query = f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        existing_folders = drive.ListFile({'q': query}).GetList()
+        if existing_folders:
+            return existing_folders[0]
 
-    # If the folder doesn't exist, create a new one
-    folder_metadata = {
-        'title': folder_name,
-        'mimeType': 'application/vnd.google-apps.folder',
-    }
-    if parent_id:
-        folder_metadata['parents'] = [{'id': parent_id}]
-    folder = drive.CreateFile(folder_metadata)
-    folder.Upload()
-    return folder
+        folder_metadata = {
+            'title': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+        }
+        if parent_id:
+            folder_metadata['parents'] = [{'id': parent_id}]
+        folder = drive.CreateFile(folder_metadata)
+        folder.Upload()
+        return folder
+    except Exception as e:
+        logging.error(f"Failed to create folder: {str(e)}")
+        raise
+
+
+def upload_file(drive, folder_id, file_path):
+    try:
+        gfile = drive.CreateFile({'parents': [{'id': folder_id}]})
+        gfile.SetContentFile(file_path)
+        gfile.Upload()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logging.info(f"{timestamp} - Uploaded: {file_path}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to upload file: {str(e)}")
+        return False
 
 
 def upload_folder(drive, folder_path, parent_id=None):
@@ -43,13 +60,11 @@ def upload_folder(drive, folder_path, parent_id=None):
         folder_name = os.path.basename(folder_path)
         folder_id = None
 
-        # Check if the folder already exists on Google Drive
         query = f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         existing_folders = drive.ListFile({'q': query}).GetList()
         if existing_folders:
             folder_id = existing_folders[0]['id']
 
-        # Create the folder if it doesn't exist
         if folder_id is None:
             if parent_id is None:
                 folder = create_folder(drive, "Automated Backup Folder")
@@ -57,55 +72,34 @@ def upload_folder(drive, folder_path, parent_id=None):
                 folder = create_folder(drive, folder_name, parent_id)
             folder_id = folder['id']
 
-        total_files = 0
-        for root, dirs, files in os.walk(folder_path):
-            total_files += len(files)
-
+        total_files = sum(len(files) for _, _, files in os.walk(folder_path))
         count = 0
-        progress_bar['maximum'] = total_files
 
-        # Retrieve existing files in the folder on Google Drive
         query = f"'{folder_id}' in parents and trashed=false"
         existing_files = drive.ListFile({'q': query}).GetList()
         existing_file_names = {file['title']: file['modifiedDate'] for file in existing_files}
 
-        for root, dirs, files in os.walk(folder_path):
+        for root, _, files in os.walk(folder_path):
             for file in files:
                 file_path = os.path.join(root, file)
 
-                # Check if the file already exists on Google Drive
                 if file in existing_file_names:
                     local_modified_time = os.path.getmtime(file_path)
                     drive_modified_time = datetime.strptime(existing_file_names[file][:19], "%Y-%m-%dT%H:%M:%S")
                     if drive_modified_time >= datetime.fromtimestamp(local_modified_time):
-                        # File exists and is up to date on Google Drive, skip uploading
                         count += 1
-                        progress_bar['value'] = count
-                        window.update_idletasks()
                         continue
 
-                gfile = drive.CreateFile({'title': file, 'parents': [{'id': folder_id}]})
-                gfile.SetContentFile(file_path)
-                gfile.Upload()
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                logging.info(f"{timestamp} - Uploaded: {file_path}")
-                count += 1
-                progress_bar['value'] = count
-                window.update_idletasks()
-                update_log_text(f"{timestamp} - Uploaded: {file_path}\n")
+                if upload_file(drive, folder_id, file_path):
+                    count += 1
 
-        logging.info("-" * 30)  # Add dashed line separator
-        logging.info("")  # Add a line break
+        logging.info("-" * 30)
+        logging.info("")
         logging.info("Folder backup completed.")
-        update_log_text("\nFolder backup completed.\n")
+        return True
     except Exception as e:
         logging.error(f"Folder backup failed: {str(e)}")
-        update_log_text(f"Folder backup failed: {str(e)}\n")
-
-
-def update_log_text(text):
-    event_log_text.insert(tk.END, text)
-    event_log_text.see(tk.END)
+        return False
 
 
 def add_folder():
@@ -121,7 +115,8 @@ def backup_folders():
     folder_paths = [entry.get() for entry in folder_entries]
     invalid_folders = []
 
-    drive = authenticate()
+    credentials_file = 'XXX.json'  # Insert your JSON credentials file here
+    drive = authenticate(credentials_file)
     if not drive:
         status_label.config(text="Authentication failed.")
         return
@@ -130,12 +125,12 @@ def backup_folders():
 
     for folder_path in folder_paths:
         if os.path.isdir(folder_path):
-            upload_folder(drive, folder_path, parent_id=automated_backup_folder['id'])
+            threading.Thread(target=upload_folder, args=(drive, folder_path, automated_backup_folder['id'])).start()
         else:
             invalid_folders.append(folder_path)
 
     if len(invalid_folders) == 0:
-        status_label.config(text="Backup completed.")
+        status_label.config(text="Backup started.")
     else:
         invalid_folder_paths = "\n".join(invalid_folders)
         status_label.config(text=f"Invalid folder paths:\n{invalid_folder_paths}")
